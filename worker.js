@@ -1,4 +1,3 @@
-const { randomUUID } = require("crypto");
 const express = require("express");
 const morgan = require("morgan");
 const fs = require("fs");
@@ -12,15 +11,14 @@ async function makeWorker(PORT) {
   let reduce_status = STATES.WORKER_IDLE;
   const partitionLocations = [];
 
-  const workerId = randomUUID();
   const app = express();
   app.use(express.json());
 
   const redisClient = redis.createClient({
     password: process.env.REDIS_PASSWORD,
     socket: {
-      host: "redis-15048.c100.us-east-1-4.ec2.cloud.redislabs.com",
-      port: 15048,
+      host: process.env.REDIS_HOST,
+      port: process.env.REDIS_PORT,
     },
   });
 
@@ -32,13 +30,17 @@ async function makeWorker(PORT) {
 
   await redisClient.connect();
 
-  function saveToRedis(partitions) {
+  async function saveToRedis(partitions) {
     try {
       for (let i = 0; i < partitions.length; i++) {
-        redisClient.set(`worker-${PORT}-${i}`, JSON.stringify(partitions[i]));
-        partitionLocations.push(`worker-${PORT}-${i}`);
+        const key = `worker-${PORT}-${i}`;
+        const value = JSON.stringify(partitions[i]);
+        await redisClient.set(key, value);
+        console.log(`${key} key set to redis successfully`);
+        redisClient.expire(key, 600);
+        partitionLocations.push(key);
+        console.log("save to redis: ", partitionLocations);
       }
-
       map_status = STATES.MAP_COMPLETED;
       status = STATES.WORKER_IDLE;
     } catch (err) {
@@ -111,6 +113,13 @@ async function makeWorker(PORT) {
   app.use(morgan("dev"));
 
   app.post("/task", (req, res) => {
+    if (status != STATES.WORKER_IDLE) {
+      res.status(200).json({
+        status,
+      });
+      return;
+    }
+
     status = STATES.WORKER_RUNNING;
 
     const { taskType } = req.body;
@@ -119,6 +128,8 @@ async function makeWorker(PORT) {
       const { inputFilePath, mapperFilePath, numReducers } = req.body;
 
       map_status = STATES.MAP_RUNNING;
+      partitionLocations.length = 0;
+
       execMap(inputFilePath, mapperFilePath, numReducers);
 
       res.status(200).json({
@@ -143,8 +154,12 @@ async function makeWorker(PORT) {
   });
 
   app.get("/redis-locations", (req, res) => {
+    let keys = [];
+    if (map_status == STATES.MAP_COMPLETED) {
+      keys = partitionLocations;
+    }
     res.status(200).json({
-      keys: partitionLocations,
+      keys,
     });
   });
 

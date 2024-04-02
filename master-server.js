@@ -1,4 +1,5 @@
 const express = require("express");
+const fs = require("fs");
 const path = require("path");
 const morgan = require("morgan");
 const {
@@ -8,6 +9,7 @@ const {
   BASE_URL,
   FILE_PARTS_DIR,
   STATES,
+  OUTPUT_FILES,
 } = require("./config.js");
 const { default: axios } = require("axios");
 
@@ -48,7 +50,7 @@ function makeMaster(PORT, filenames) {
           taskType: "reduce",
           fileLocations: filesForReducer,
           reducerFilePath: `./public/${reducerFileName}`,
-          outputFilePath: `./public/output-${j}.json`,
+          outputFilePath: `./public/${OUTPUT_FILES[j]}`,
         },
         workerURL: `${BASE_URL}:${REDUCE_PORTS[j]}/task`,
         statusURL: `${BASE_URL}:${REDUCE_PORTS[j]}/reduce-status`,
@@ -154,6 +156,8 @@ function makeMaster(PORT, filenames) {
     while (!allTasksCompleted) {
       allTasksCompleted = await pingTasks(reduce_tasks);
       if (allTasksCompleted) {
+        map_tasks.length = 0;
+        reduce_tasks.length = 0;
         status = STATES.REDUCE_COMPLETED;
         break;
       } else {
@@ -168,7 +172,33 @@ function makeMaster(PORT, filenames) {
   app.use(express.static(path.join(__dirname, "public")));
 
   app.post("/map-reduce", (req, res) => {
+    if (status != STATES.WORKER_IDLE && status != STATES.REDUCE_COMPLETED) {
+      res.status(200).json({
+        message:
+          "Sorry! Please wait already a map reduce task is in progress...",
+        prevTaskStatus: status,
+      });
+      return;
+    }
+
     const { mapperFileName, reducerFileName } = req.body;
+
+    if (
+      !fs.existsSync(`./public/${mapperFileName}`) ||
+      !fs.existsSync(`./public/${reducerFileName}`)
+    ) {
+      res.status(200).json({
+        message:
+          "There are no files with the provided mapper/reducer filenames",
+        availableFiles: [
+          "mapper-wc.js",
+          "mapper-iv.js",
+          "reducer-wc.js",
+          "reducer-iv.js",
+        ],
+      });
+      return;
+    }
 
     runMapReduce(mapperFileName, reducerFileName);
 
@@ -179,16 +209,15 @@ function makeMaster(PORT, filenames) {
   });
 
   app.get("/status", (req, res) => {
-    const outputFiles = [];
+    const outputs = [];
     if (status == STATES.REDUCE_COMPLETED) {
-      for (const task of reduce_tasks) {
-        const fileName = task.workerPayload.outputFilePath.split("/").pop();
-        outputFiles.push(`${BASE_URL}:${PORT}/${fileName}`);
+      for (const filename of OUTPUT_FILES) {
+        outputs.push(`${BASE_URL}:${PORT}/${filename}`);
       }
     }
     res.status(200).json({
       status,
-      outputFiles,
+      outputs,
     });
   });
 
@@ -198,7 +227,6 @@ function makeMaster(PORT, filenames) {
 
   app.use((err, req, res, next) => {
     console.error(err.stack);
-    console.log("inside");
     res.status(500).send("Something broke!");
   });
 

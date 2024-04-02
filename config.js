@@ -7,6 +7,10 @@ const FILE_PARTS_DIR = "./file_parts";
 const MAPPER_FILE_PATH = "./public/mapper.js";
 const REDUCER_FILE_PATH = "./public/reducer.js";
 const INPUT_FILE_PATH = "./public/input.txt";
+const OUTPUT_FILES = [];
+for (let i = 0; i < NUM_REDUCERS; i++) {
+  OUTPUT_FILES.push(`output-reducer-${i}.json`);
+}
 const MAP_PORTS = WORKER_PORTS.slice(0, NUM_MAPPERS);
 const REDUCE_PORTS = WORKER_PORTS.slice(
   NUM_MAPPERS,
@@ -41,4 +45,5 @@ module.exports = {
   REDUCE_PORTS,
   BASE_URL,
   STATES,
+  OUTPUT_FILES,
 };
